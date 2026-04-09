@@ -970,6 +970,7 @@
   const pfType1 = $("#pf-type1");
   const pfType2 = $("#pf-type2");
   const pfLevel = $("#pf-level");
+  const pfRoute = $("#pf-route");
   const pfAbility = $("#pf-ability");
   const pfNature = $("#pf-nature");
   const pfNatureEffect = $("#pf-nature-effect");
@@ -1028,7 +1029,12 @@
   }
 
   function fillNatureSelect() {
-    pfNature.innerHTML = Object.keys(NATURES)
+    const keys = Object.keys(NATURES).sort((a, b) =>
+      natureDisplayNameEs(a).localeCompare(natureDisplayNameEs(b), "es", {
+        sensitivity: "base",
+      })
+    );
+    pfNature.innerHTML = keys
       .map((key) => {
         const tip = escapeAttr(natureShortSummary(key));
         const lab = escapeHtml(natureDisplayNameEs(key));
@@ -1386,6 +1392,10 @@
       itemRaw
         ? `<p class="slot-line slot-line-item"><span class="slot-k">Objeto</span> <span class="slot-item-with-thumb"><span class="slot-item-thumb-wrap"><img class="slot-item-thumb" src="${escapeAttr(itemCatalogSpriteUrl(itemRaw))}" alt="" width="22" height="22" loading="lazy" /></span><span class="slot-v">${escapeHtml(itemLabel)}</span></span></p>`
         : `<p class="slot-line"><span class="slot-k">Objeto</span> <span class="slot-v">${escapeHtml(item)}</span></p>`;
+    const routeRaw = (mon.route || "").trim();
+    const routeLine = routeRaw
+      ? `<p class="slot-line slot-route-line"><span class="slot-k">Ruta</span> <span class="slot-v">${escapeHtml(routeRaw)}</span></p>`
+      : "";
     const moves = (mon.moves && mon.moves.length ? [...mon.moves] : []).slice(0, 4);
     while (moves.length < 4) moves.push({ name: "", type: "", category: "physical" });
     const moveRows = moves
@@ -1409,6 +1419,7 @@
       .join("");
     return `<div class="slot-item-nat">
       ${itemLine}
+      ${routeLine}
       <p class="slot-line slot-nature-line"><span class="slot-k">Naturaleza</span> <span class="slot-v">${escapeHtml(natureName)} <span class="slot-nature-fx">(${escapeHtml(natureFx)})</span></span></p>
     </div>
     <div class="slot-moves" aria-label="Moves (with Physical, Special, or Status)">${moveRows}</div>`;
@@ -1471,6 +1482,23 @@
     return state.pokemon.find((p) => p.id === id);
   }
 
+  /** Case-insensitive trimmed key for duplicate nickname checks. */
+  function nicknameDuplicateKey(nickname) {
+    return String(nickname || "").trim().toLowerCase();
+  }
+
+  /** True if another Pokémon of the same player already uses this nickname (edit: pass excludeId). */
+  function hasDuplicateNickname(playerId, nickname, excludePokemonId) {
+    const key = nicknameDuplicateKey(nickname);
+    if (!key) return false;
+    return state.pokemon.some(
+      (p) =>
+        p.playerId === playerId &&
+        p.id !== excludePokemonId &&
+        nicknameDuplicateKey(p.nickname) === key
+    );
+  }
+
   function livingIdsForPlayer(playerId) {
     return state.pokemon
       .filter((p) => p.playerId === playerId && p.status !== "dead")
@@ -1482,7 +1510,8 @@
     const s = q.toLowerCase();
     return (
       (mon.nickname || "").toLowerCase().includes(s) ||
-      (mon.species || "").toLowerCase().includes(s)
+      (mon.species || "").toLowerCase().includes(s) ||
+      (mon.route || "").toLowerCase().includes(s)
     );
   }
 
@@ -1584,6 +1613,7 @@
         <p class="species">${escapeAttr(mon.species || "")} · Lv. ${mon.level ?? "?"}</p>
         <div class="type-icons">${typeIconsHtml(mon.types)}</div>
         <p class="meta">${escapeAttr(mon.ability || "—")} · ${escapeAttr((mon.heldItem || "").trim() ? itemDisplayNameForUi(mon.heldItem) : "sin objeto")}</p>
+        ${(mon.route || "").trim() ? `<p class="meta route-line"><span class="route-k">Route</span> ${escapeHtml((mon.route || "").trim())}</p>` : ""}
         <p class="meta nature-line"><span class="nature-tag" title="${natureTip}">${escapeHtml(natureLab)}</span></p>
         ${cardStatsLineHtml(mon)}
       </div>
@@ -1828,7 +1858,7 @@
           (p) =>
             `<button type="button" class="pick-row" data-pick-id="${p.id}">
             <img class="sprite-tiny" src="${escapeAttr(spriteSrc(p))}" alt="" width="40" height="40" />
-            <div class="pick-row-main"><div class="pn">${escapeAttr(p.nickname)}</div><div class="ps">${escapeAttr(p.species)} Lv.${p.level}</div>${pickRowStatsHtml(p)}</div>
+            <div class="pick-row-main"><div class="pn">${escapeAttr(p.nickname)}</div><div class="ps">${escapeAttr(p.species)} Lv.${p.level}</div>${(p.route || "").trim() ? `<div class="pick-route">${escapeHtml((p.route || "").trim())}</div>` : ""}${pickRowStatsHtml(p)}</div>
             <div class="type-icons">${typeIconsHtml(p.types)}</div>
           </button>`
         )
@@ -1861,12 +1891,13 @@
   function openNewModal() {
     pfId.value = "";
     pfPlayer.value = state.activePlayerId;
-    pfStatus.value = "party";
+    pfStatus.value = "boxed";
     pfSpecies.value = "";
     pfNickname.value = "";
     pfType1.value = "normal";
     pfType2.value = "";
     pfLevel.value = 5;
+    if (pfRoute) pfRoute.value = "";
     pfAbility.value = "";
     pfItem.value = "";
     pfNature.value = "hardy";
@@ -1898,6 +1929,7 @@
     pfType1.value = mon.types[0] || "normal";
     pfType2.value = mon.types[1] || "";
     pfLevel.value = mon.level ?? "";
+    if (pfRoute) pfRoute.value = mon.route != null ? String(mon.route) : "";
     pfAbility.value = mon.ability || "";
     pfItem.value = mon.heldItem || "";
     pfNature.value = mon.nature in NATURES ? mon.nature : "hardy";
@@ -1936,6 +1968,7 @@
       level: Number(pfLevel.value) || 1,
       ability: pfAbility.value.trim(),
       heldItem: pfItem.value.trim(),
+      route: pfRoute ? pfRoute.value.trim() : "",
       nature: pfNature.value,
       spriteUrl: guessSpritePathFromSpecies(species) || "",
       stats: {
@@ -1956,6 +1989,18 @@
     const existingId = pfId.value;
     const id = existingId || uuid();
     const mon = readMonFromForm(id);
+    if (
+      hasDuplicateNickname(mon.playerId, mon.nickname, existingId || undefined)
+    ) {
+      alert(
+        `Ya existe un Pokémon con el mote «${mon.nickname}» para este jugador. Elegí otro nombre.`
+      );
+      if (pfNickname) {
+        pfNickname.focus();
+        pfNickname.select();
+      }
+      return;
+    }
     if (existingId) {
       const idx = state.pokemon.findIndex((p) => p.id === existingId);
       if (idx >= 0) state.pokemon[idx] = mon;

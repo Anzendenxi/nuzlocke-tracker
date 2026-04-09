@@ -44,7 +44,7 @@
   <main>
     <section id="panel-roster" class="panel active" data-panel="roster">
       <div class="toolbar toolbar-filters">
-        <input type="search" id="roster-search" placeholder="Search nickname or species…" aria-label="Search roster" />
+        <input type="search" id="roster-search" placeholder="Search nickname, species, or route…" aria-label="Search roster" />
         <label class="chk"><input type="checkbox" id="filter-boxed" checked /> Show boxed</label>
         <label class="filter-label">Sort by stat
           <select id="roster-sort-stat" aria-label="Sort roster by highest stat"></select>
@@ -53,7 +53,7 @@
           <select id="roster-filter-type" aria-label="Filter roster by type"></select>
         </label>
       </div>
-      <p class="hint toolbar-hint">Click a Pokémon card to edit stats, moves, item, nature, and location (Party / Boxed / Dead).</p>
+      <p class="hint toolbar-hint">Click a Pokémon card to edit stats, moves, item, nature, capture route, and location (Party / Boxed / Dead).</p>
       <div id="roster-list" class="card-grid"></div>
     </section>
 
@@ -324,10 +324,10 @@
             <select id="pf-player" required></select>
           </label>
           <label>Location
-            <input type="hidden" id="pf-status" value="party" />
+            <input type="hidden" id="pf-status" value="boxed" />
             <div class="pf-status-toggle" role="group" aria-label="Pokémon location">
-              <button type="button" class="pf-status-btn" data-status="party" aria-pressed="true">Party</button>
-              <button type="button" class="pf-status-btn" data-status="boxed" aria-pressed="false">Boxed</button>
+              <button type="button" class="pf-status-btn" data-status="party" aria-pressed="false">Party</button>
+              <button type="button" class="pf-status-btn" data-status="boxed" aria-pressed="true">Boxed</button>
               <button type="button" class="pf-status-btn" data-status="dead" aria-pressed="false">Dead</button>
             </div>
           </label>
@@ -348,6 +348,9 @@
           </label>
           <label>Level
             <input type="number" id="pf-level" min="1" max="100" required />
+          </label>
+          <label>Route
+            <input type="text" id="pf-route" maxlength="120" placeholder="Where you caught it (e.g. Route 201, grass)" autocomplete="off" />
           </label>
           <label>Ability
             <input type="text" id="pf-ability" placeholder="Ability" />

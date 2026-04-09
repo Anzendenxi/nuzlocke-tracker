@@ -1427,6 +1427,16 @@ input.input-invalid {
   margin-top: 0.25rem;
 }
 
+.poke-card .route-line {
+  margin-top: 0.2rem;
+}
+
+.poke-card .route-k {
+  font-weight: 600;
+  color: var(--text);
+  margin-right: 0.25rem;
+}
+
 .nature-tag {
   cursor: help;
   text-decoration: underline dotted;
@@ -1742,6 +1752,12 @@ input.input-invalid {
 .pick-row .ps {
   font-size: 0.75rem;
   color: var(--muted);
+}
+
+.pick-row .pick-route {
+  font-size: 0.7rem;
+  color: var(--muted);
+  margin-top: 0.15rem;
 }
 
 .empty-state {
