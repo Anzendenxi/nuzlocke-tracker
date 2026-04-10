@@ -36,8 +36,9 @@
     <button type="button" class="tab active" role="tab" aria-selected="true" data-tab="roster">Roster &amp; boxed</button>
     <button type="button" class="tab" role="tab" aria-selected="false" data-tab="dead">Dead box</button>
     <button type="button" class="tab" role="tab" aria-selected="false" data-tab="team">Team builder</button>
+    <button type="button" class="tab" role="tab" aria-selected="false" data-tab="field-matchups">Matchups</button>
     <button type="button" class="tab" role="tab" aria-selected="false" data-tab="items">Items</button>
-    <button type="button" class="tab" role="tab" aria-selected="false" data-tab="matchups">Type matchups</button>
+    <button type="button" class="tab" role="tab" aria-selected="false" data-tab="matchups">Type chart</button>
     <button type="button" class="tab" role="tab" aria-selected="false" data-tab="rules-shop">Rules &amp; shop</button>
   </nav>
 
@@ -71,7 +72,7 @@
     </section>
 
     <section id="panel-team" class="panel" data-panel="team" hidden>
-      <p class="hint">Six slots — only party or boxed Pokémon (not dead). <strong>Click a filled slot</strong> to edit that Pokémon (moves, item, etc.). <strong>Click an empty slot</strong> to assign one. Use <strong>Swap</strong> to pick a different Pokémon without clearing first. Right-click a slot to clear it.</p>
+      <p class="hint">Six slots — only party or boxed Pokémon (not dead). <strong>Click a filled slot</strong> to edit that Pokémon (moves, item, etc.). <strong>Click an empty slot</strong> to assign one. Use <strong>Swap</strong> to pick a different Pokémon without clearing first. Right-click a slot to clear it. When the picker opens, use <strong>Search</strong> to filter by nickname or species.</p>
       <div id="team-slots" class="team-slots"></div>
       <div class="team-analysis">
         <h2>Team analysis</h2>
@@ -88,6 +89,41 @@
           </div>
         </div>
       </div>
+    </section>
+
+    <section id="panel-field-matchups" class="panel" data-panel="field-matchups" hidden>
+      <p class="hint">Choose <strong>two Pokémon</strong> from your current team (six slots). Set the <strong>rival typings</strong> on the field (doubles). The <strong>1–10</strong> score blends offense (best move vs each rival) and defense: each rival STAB is scored using mostly the <strong>worst</strong> damage on either Pokémon (so a frail partner isn’t hidden behind a resist partner). Use <strong>Ignore</strong> to exclude someone from rankings only (toggle; strikethrough). Physical/Special moves only.</p>
+      <div class="fm-layout">
+        <div class="fm-block">
+          <h2 class="fm-heading">Team — select 2</h2>
+          <p class="fm-subhint">Up to two slots highlighted. <strong>Ignore</strong> toggles strikethrough and drops that Pokémon from rankings (saved; not “dead”). Empty slots are disabled.</p>
+          <div id="fm-slots" class="fm-slots" role="group" aria-label="Team slots, pick two"></div>
+        </div>
+        <div class="fm-block fm-block-rivals">
+          <h2 class="fm-heading">Rival typings</h2>
+          <div class="fm-rivals-grid">
+            <div class="fm-rival-card">
+              <h3 class="fm-rival-title">Rival 1</h3>
+              <label class="fm-rival-label">Type 1
+                <select id="fm-r1-t1" class="fm-rival-sel" aria-label="Rival 1 first type"></select>
+              </label>
+              <label class="fm-rival-label">Type 2 <span class="optional">(optional)</span>
+                <select id="fm-r1-t2" class="fm-rival-sel" aria-label="Rival 1 second type"></select>
+              </label>
+            </div>
+            <div class="fm-rival-card">
+              <h3 class="fm-rival-title">Rival 2</h3>
+              <label class="fm-rival-label">Type 1
+                <select id="fm-r2-t1" class="fm-rival-sel" aria-label="Rival 2 first type"></select>
+              </label>
+              <label class="fm-rival-label">Type 2 <span class="optional">(optional)</span>
+                <select id="fm-r2-t2" class="fm-rival-sel" aria-label="Rival 2 second type"></select>
+              </label>
+            </div>
+          </div>
+        </div>
+      </div>
+      <div id="fm-output" class="fm-output" aria-live="polite"></div>
     </section>
 
     <section id="panel-items" class="panel" data-panel="items" hidden>
@@ -306,6 +342,11 @@
         <button type="button" class="icon-btn" data-close-pick aria-label="Close">×</button>
       </header>
       <p class="hint" style="margin:0.5rem 1rem 0">Party or boxed Pokémon for this player (not dead). Right-click a filled team slot to clear it.</p>
+      <div class="pick-toolbar">
+        <label class="pick-search-label">Search by nickname or species
+          <input type="search" id="pick-search" placeholder="Type to filter…" autocomplete="off" spellcheck="false" aria-label="Filter Pokémon by nickname or species" />
+        </label>
+      </div>
       <div id="pick-list" class="pick-list"></div>
     </div>
   </div>

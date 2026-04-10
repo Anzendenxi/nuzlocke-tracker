@@ -122,6 +122,9 @@
   /** "defend" = fixed defender, list attack types. "attack" = fixed move type, list defending typings. */
   let matchupMode = "defend";
 
+  /** Doubles matchup panel: indices 0–5 of selected team slots (max 2). */
+  let fmSelectedSlots = [];
+
   function uuid() {
     if (crypto.randomUUID) return crypto.randomUUID();
     return "xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx".replace(/[xy]/g, (c) => {
@@ -139,6 +142,7 @@
       teams: { [pid]: [null, null, null, null, null, null] },
       activePlayerId: pid,
       itemCatalog: [],
+      matchupsExcludedIds: [],
     };
   }
 
@@ -159,6 +163,10 @@
         data.activePlayerId = data.players[0].id;
       }
       if (!Array.isArray(data.itemCatalog)) data.itemCatalog = [];
+      if (!Array.isArray(data.matchupsExcludedIds)) data.matchupsExcludedIds = [];
+      data.matchupsExcludedIds = data.matchupsExcludedIds.filter((id) =>
+        data.pokemon.some((p) => p.id === id)
+      );
       let statusPersist = false;
       data.pokemon.forEach((mon) => {
         const prevStatus = mon.status;
@@ -937,6 +945,8 @@
   const rosterList = $("#roster-list");
   const deadList = $("#dead-list");
   const teamSlots = $("#team-slots");
+  const fmSlots = $("#fm-slots");
+  const fmOutput = $("#fm-output");
   const teamWeakTable = $("#team-weak-table");
   const teamOffenseTable = $("#team-offense-table");
   const itemsCatalogList = $("#items-catalog-list");
@@ -961,6 +971,7 @@
   const modalRoot = $("#modal-root");
   const pickModal = $("#pick-modal");
   const pickList = $("#pick-list");
+  const pickSearch = $("#pick-search");
   const pokemonForm = $("#pokemon-form");
   const pfId = $("#pf-id");
   const pfPlayer = $("#pf-player");
@@ -1653,6 +1664,9 @@
       bindItemCatalogThumbFallback(img)
     );
     renderTeamAnalysis();
+    if ($("#panel-field-matchups")?.classList.contains("active")) {
+      renderFieldMatchups();
+    }
   }
 
   function handleTeamSlotActivate(e) {
@@ -1830,8 +1844,413 @@
     teamOffenseTable.innerHTML = covHtml + missHtml;
   }
 
-  function openPickModal(slotIndex) {
-    pickingSlotIndex = slotIndex;
+  function fmMonLabel(mon) {
+    const n = (mon.nickname || "").trim();
+    if (n) return n;
+    const s = (mon.species || "").trim();
+    return s || "—";
+  }
+
+  function normalizeFmRivalTypes(t1, t2) {
+    const a = (t1 || "").trim();
+    const b = (t2 || "").trim();
+    if (!a || !ALL_TYPES.includes(a)) return [];
+    if (!b || !ALL_TYPES.includes(b) || b === a) return [a];
+    return [a, b];
+  }
+
+  function fmBestDamagingMoveVs(mon, defenderTypes) {
+    const D = defenderTypes.filter(Boolean);
+    if (!D.length) return null;
+    let best = { mult: 0, label: "" };
+    for (const m of mon.moves || []) {
+      if (!moveUsesTypeChartForDamage(m)) continue;
+      const mt = m.type;
+      if (!mt || !ALL_TYPES.includes(mt)) continue;
+      const mult = defenseMultiplier(mt, D);
+      const moveName = (m.name || "").trim();
+      const lab = moveName
+        ? `${moveName} (${typeNameEn(mt)})`
+        : typeNameEn(mt);
+      if (mult > best.mult) best = { mult, label: lab };
+    }
+    return best.mult > 0 ? best : null;
+  }
+
+  function syncFmRivalDuplicateSecondTypes() {
+    const pairs = [
+      [$("#fm-r1-t1"), $("#fm-r1-t2")],
+      [$("#fm-r2-t1"), $("#fm-r2-t2")],
+    ];
+    pairs.forEach(([a, b]) => {
+      if (a && b && b.value && a.value === b.value) b.value = "";
+    });
+  }
+
+  function fmStabSectionHtml(title, stabTypes, monA, monB) {
+    if (!stabTypes.length) return "";
+    let rows = `<div class="fm-stab-row fm-stab-row-head"><span>STAB (incoming)</span><span>${escapeHtml(fmMonLabel(monA))}</span><span>${escapeHtml(fmMonLabel(monB))}</span></div>`;
+    for (const atk of stabTypes) {
+      const ma = formatMatchupMult(defenseMultiplier(atk, monA.types));
+      const mb = formatMatchupMult(defenseMultiplier(atk, monB.types));
+      rows += `<div class="fm-stab-row"><span>${typeIconImg(atk)} ${escapeHtml(typeNameEn(atk))}</span><span>${ma}</span><span>${mb}</span></div>`;
+    }
+    const b1 = fmBestDamagingMoveVs(monA, stabTypes);
+    const b2 = fmBestDamagingMoveVs(monB, stabTypes);
+    const best = Math.max(b1?.mult || 0, b2?.mult || 0);
+    const cov =
+      best >= 2
+        ? `<p class="fm-muted">Best move damage vs this typing: up to <strong>×${Math.round(best * 100) / 100}</strong> (${best >= 4 ? "4×" : "super-effective"}).</p>`
+        : `<p class="fm-tip-warn">No Physical/Special move on this pair reaches ×2+ vs this rival’s typing — consider coverage or switching.</p>`;
+    const who =
+      b1 && b2
+        ? b1.mult >= b2.mult
+          ? b1.label
+          : b2.label
+        : b1
+          ? b1.label
+          : b2
+            ? b2.label
+            : "";
+    const moveLine = who
+      ? `<p class="fm-muted">Strongest typed hit: <strong>${escapeHtml(String(who))}</strong></p>`
+      : `<p class="fm-muted">Set move types (Physical/Special) in Pokémon details for concrete numbers.</p>`;
+    return `<div class="fm-output-section"><h3>${escapeHtml(title)} (${typingLabel(stabTypes)})</h3>${cov}${moveLine}${rows}</div>`;
+  }
+
+  function fmCollectTips(monA, monB, r1Types, r2Types) {
+    const tips = [];
+    const seen = new Set();
+    const stabs = [...new Set([...r1Types, ...r2Types])].filter(Boolean);
+    for (const atk of stabs) {
+      const wa = defenseMultiplier(atk, monA.types);
+      const wb = defenseMultiplier(atk, monB.types);
+      const key = `${atk}-${wa}-${wb}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      if (wa >= 2 && wb >= 2) {
+        tips.push({
+          warn: true,
+          text: `Both Pokémon are weak (${formatMatchupMult(wa)} / ${formatMatchupMult(wb)}) to ${typeNameEn(atk)} — overlapping STAB risk.`,
+        });
+      } else if (wa >= 2 && wb <= 1) {
+        tips.push({
+          text: `${fmMonLabel(monB)} tanks ${typeNameEn(atk)} better than ${fmMonLabel(monA)}.`,
+        });
+      } else if (wb >= 2 && wa <= 1) {
+        tips.push({
+          text: `${fmMonLabel(monA)} tanks ${typeNameEn(atk)} better than ${fmMonLabel(monB)}.`,
+        });
+      }
+    }
+    const best1 = Math.max(
+      fmBestDamagingMoveVs(monA, r1Types)?.mult || 0,
+      fmBestDamagingMoveVs(monB, r1Types)?.mult || 0
+    );
+    const best2 = Math.max(
+      fmBestDamagingMoveVs(monA, r2Types)?.mult || 0,
+      fmBestDamagingMoveVs(monB, r2Types)?.mult || 0
+    );
+    if (best1 >= 2 && best2 >= 2) {
+      tips.push({
+        text: `Offensive pressure: this pair can hit both rivals for super-effective damage (best multipliers ×${best1} and ×${best2}).`,
+      });
+    } else if (best1 < 2 || best2 < 2) {
+      tips.push({
+        warn: best1 < 2 && best2 < 2,
+        text: `Coverage gap: ${best1 < 2 ? "Rival 1" : ""}${best1 < 2 && best2 < 2 ? " and " : ""}${best2 < 2 ? "Rival 2" : ""} lack ×2+ from this pair’s moves.`,
+      });
+    }
+    return tips;
+  }
+
+  /** 0–1 from best move multiplier vs a rival (×4 best … ×0 worst). */
+  function fmOffenseTier01(mult) {
+    const m = mult == null || mult <= 0 ? 0 : Number(mult);
+    if (m <= 0) return 0;
+    if (m >= 4) return 1;
+    if (m >= 2) return 0.78;
+    if (m >= 1) return 0.52;
+    if (m >= 0.5) return 0.34;
+    if (m >= 0.25) return 0.18;
+    return 0.05;
+  }
+
+  /** 0–1 from incoming STAB multiplier on the better-positioned Pokémon (min damage). */
+  function fmDefensePivot01(pivotMult) {
+    const m = pivotMult == null ? 1 : Number(pivotMult);
+    if (m <= 0) return 1;
+    if (m <= 0.25) return 0.9;
+    if (m <= 0.5) return 0.76;
+    if (m <= 1) return 0.55;
+    if (m <= 2) return 0.3;
+    if (m <= 4) return 0.08;
+    return 0;
+  }
+
+  /**
+   * Offense: average tier from best Physical/Special move vs each rival typing.
+   * Defense: per rival STAB, blend best pivot (min damage) and worst exposure (max damage).
+   * Using mostly max(wa,wb) stops a bulky partner from hiding a partner who is ×2 (e.g. Scyther vs Fire STAB).
+   * Extra penalty if both are ×2+ to the same STAB.
+   */
+  function fmPairBreakdown(monA, monB, R1, R2) {
+    if (!R1.length || !R2.length) return null;
+    let offAcc = 0;
+    let nRiv = 0;
+    for (const R of [R1, R2]) {
+      const b1 = fmBestDamagingMoveVs(monA, R);
+      const b2 = fmBestDamagingMoveVs(monB, R);
+      const bestMult = Math.max(b1?.mult || 0, b2?.mult || 0);
+      offAcc += fmOffenseTier01(bestMult);
+      nRiv++;
+    }
+    const offense01 = nRiv ? offAcc / nRiv : 0;
+
+    const stabs = [...new Set([...R1, ...R2])].filter((t) => t && ALL_TYPES.includes(t));
+    const DEF_WEIGHT_BEST = 0.28;
+    const DEF_WEIGHT_WORST = 0.72;
+    let defAcc = 0;
+    let nStab = 0;
+    let doubleWeakStacks = 0;
+    for (const atk of stabs) {
+      const wa = defenseMultiplier(atk, monA.types);
+      const wb = defenseMultiplier(atk, monB.types);
+      const best = Math.min(wa, wb);
+      const worst = Math.max(wa, wb);
+      const stabScore =
+        DEF_WEIGHT_BEST * fmDefensePivot01(best) +
+        DEF_WEIGHT_WORST * fmDefensePivot01(worst);
+      defAcc += stabScore;
+      if (wa >= 2 && wb >= 2) doubleWeakStacks += 1;
+      nStab++;
+    }
+    let defense01 = nStab ? defAcc / nStab : 0.5;
+    if (doubleWeakStacks) {
+      defense01 = Math.max(0, defense01 - 0.07 * doubleWeakStacks);
+    }
+
+    let combined01 = 0.52 * offense01 + 0.48 * defense01;
+    combined01 = Math.max(0, Math.min(1, combined01));
+    const score10 = Math.max(1, Math.min(10, Math.round(1 + 9 * combined01)));
+    return { offense01, defense01, combined01, score10 };
+  }
+
+  function ensureMatchupsExcludedIds() {
+    if (!Array.isArray(state.matchupsExcludedIds)) state.matchupsExcludedIds = [];
+  }
+
+  function isMatchupsExcluded(pokemonId) {
+    ensureMatchupsExcludedIds();
+    return state.matchupsExcludedIds.includes(pokemonId);
+  }
+
+  function toggleMatchupsExcluded(pokemonId) {
+    ensureMatchupsExcludedIds();
+    const i = state.matchupsExcludedIds.indexOf(pokemonId);
+    if (i >= 0) state.matchupsExcludedIds.splice(i, 1);
+    else state.matchupsExcludedIds.push(pokemonId);
+    saveState();
+    renderFieldMatchups();
+  }
+
+  function fmRankedPairsHtml(R1, R2) {
+    const filled = [];
+    const pid = state.activePlayerId;
+    const slots = state.teams[pid] || [];
+    for (let i = 0; i < 6; i++) {
+      const id = slots[i];
+      if (!id) continue;
+      const mon = pokemonById(id);
+      if (!mon || mon.status === "dead" || isMatchupsExcluded(mon.id)) continue;
+      filled.push({ slot: i, mon });
+    }
+    if (filled.length < 2) {
+      return `<div class="fm-output-section"><h3>Pair rankings (1–10)</h3><p class="fm-muted">Need at least two Pokémon in team slots that are not ignored for this sim.</p></div>`;
+    }
+    const ranked = [];
+    for (let a = 0; a < filled.length; a++) {
+      for (let b = a + 1; b < filled.length; b++) {
+        const ma = filled[a].mon;
+        const mb = filled[b].mon;
+        const bd = fmPairBreakdown(ma, mb, R1, R2);
+        if (!bd) continue;
+        ranked.push({
+          bd,
+          label: `${fmMonLabel(ma)} + ${fmMonLabel(mb)}`,
+          slots: [filled[a].slot, filled[b].slot],
+        });
+      }
+    }
+    ranked.sort((x, y) => y.bd.combined01 - x.bd.combined01);
+    const totalPairs = ranked.length;
+    const showCount = Math.min(15, totalPairs);
+    const top = ranked.slice(0, showCount);
+    const lines = top
+      .map((r, i) => {
+        const sel =
+          fmSelectedSlots.length === 2 &&
+          fmSelectedSlots.slice().sort((a, b) => a - b).join() ===
+            r.slots.slice().sort((a, b) => a - b).join();
+        const tag = sel ? " (current pair)" : "";
+        const { score10, offense01, defense01 } = r.bd;
+        return `<div class="fm-pair-rank"><strong>${score10}/10</strong> — ${escapeHtml(r.label)} · Off ${Math.round(offense01 * 100)}% · Def ${Math.round(defense01 * 100)}%${sel ? `<span class="fm-muted">${escapeHtml(tag)}</span>` : ""}</div>`;
+      })
+      .join("");
+    const note = `<p class="fm-muted">Showing ${showCount} of ${totalPairs} pair${totalPairs === 1 ? "" : "s"} (up to 15). Ignored (strikethrough) Pokémon excluded. Offense: best move tier vs each rival. Defense: each rival STAB uses mostly the <strong>worst</strong> incoming multiplier on either Pokémon (plus some credit for the better pivot).</p>`;
+    return `<div class="fm-output-section"><h3>Pair rankings (1–10)</h3>${note}${lines}</div>`;
+  }
+
+  function renderFieldMatchups() {
+    if (!fmSlots || !fmOutput) return;
+    const pid = state.activePlayerId;
+    const slots = state.teams[pid] || [null, null, null, null, null, null];
+    fmSelectedSlots = fmSelectedSlots.filter((i) => {
+      if (i < 0 || i >= 6 || !slots[i]) return false;
+      const m = pokemonById(slots[i]);
+      return (
+        m &&
+        m.status !== "dead" &&
+        !isMatchupsExcluded(m.id)
+      );
+    });
+
+    const cells = [0, 1, 2, 3, 4, 5]
+      .map((i) => {
+        const id = slots[i];
+        const sel = fmSelectedSlots.includes(i);
+        if (!id) {
+          return `<div class="fm-slot-wrap"><button type="button" class="fm-slot fm-slot--empty" disabled data-slot="${i}" aria-label="Slot ${i + 1} empty"><span class="fm-slot-idx">Slot ${i + 1}</span><span class="fm-muted">Empty</span></button></div>`;
+        }
+        const mon = pokemonById(id);
+        if (!mon || mon.status === "dead") {
+          return `<div class="fm-slot-wrap"><button type="button" class="fm-slot fm-slot--empty" disabled data-slot="${i}"><span class="fm-slot-idx">Slot ${i + 1}</span><span class="fm-muted">${!mon ? "Missing" : "Fallen"}</span></button></div>`;
+        }
+        const excluded = isMatchupsExcluded(mon.id);
+        const tys = (mon.types || []).filter(Boolean);
+        const tHtml = tys.map((t) => typeIconImg(t)).join("");
+        let cl = "fm-slot";
+        if (excluded) {
+          cl += " fm-slot--excluded";
+        } else if (sel) {
+          cl += " fm-slot--pick fm-slot--selected";
+        } else {
+          cl += " fm-slot--pick";
+        }
+        const mainBtn = `<button type="button" class="${cl}" data-slot="${i}" ${excluded ? "disabled" : `aria-pressed="${sel}"`} aria-label="Slot ${i + 1} ${fmMonLabel(mon)}${excluded ? " (ignored for sim)" : ""}"><span class="fm-slot-idx">Slot ${i + 1}</span><img class="fm-slot-sprite" src="${escapeAttr(spriteSrc(mon))}" alt="" width="56" height="56" /><span class="fm-slot-name">${escapeHtml(fmMonLabel(mon))}</span><span class="fm-slot-types">${tHtml}</span></button>`;
+        const simBtn = `<button type="button" class="fm-toggle-sim" data-pokemon-id="${escapeAttr(mon.id)}" title="${excluded ? "Include in matchup rankings" : "Ignore for matchup rankings (this battle only in save)"}">${excluded ? "Include" : "Ignore"}</button>`;
+        return `<div class="fm-slot-wrap${excluded ? " fm-slot-wrap--ignored" : ""}">${mainBtn}${simBtn}</div>`;
+      })
+      .join("");
+    fmSlots.innerHTML = cells;
+
+    const r1t1 = $("#fm-r1-t1")?.value;
+    const r1t2 = $("#fm-r1-t2")?.value;
+    const r2t1 = $("#fm-r2-t1")?.value;
+    const r2t2 = $("#fm-r2-t2")?.value;
+    const R1 = normalizeFmRivalTypes(r1t1, r1t2);
+    const R2 = normalizeFmRivalTypes(r2t1, r2t2);
+
+    if (!R1.length || !R2.length) {
+      fmOutput.innerHTML = `<p class="fm-muted">Set at least one type for each rival (Type 1).</p>`;
+      return;
+    }
+
+    let html = "";
+
+    if (fmSelectedSlots.length < 2) {
+      html += `<p class="fm-muted">Select two Pokémon for STAB detail tables and tips (optional — pair rankings below work without a selection).</p>`;
+    } else {
+      const s0 = fmSelectedSlots[0];
+      const s1 = fmSelectedSlots[1];
+      const idA = slots[s0];
+      const idB = slots[s1];
+      const monA = idA ? pokemonById(idA) : null;
+      const monB = idB ? pokemonById(idB) : null;
+      if (
+        !monA ||
+        !monB ||
+        monA.status === "dead" ||
+        monB.status === "dead" ||
+        isMatchupsExcluded(monA.id) ||
+        isMatchupsExcluded(monB.id)
+      ) {
+        html += `<p class="fm-muted">Pick two Pokémon that are not ignored for this sim.</p>`;
+      } else {
+        const selBd = fmPairBreakdown(monA, monB, R1, R2);
+        html += `<div class="fm-output-section"><h3>Selected pair</h3><p><strong>${escapeHtml(fmMonLabel(monA))}</strong> (${typingLabel(monA.types)}) · <strong>${escapeHtml(fmMonLabel(monB))}</strong> (${typingLabel(monB.types)})</p>`;
+        if (selBd) {
+          html += `<p class="fm-score-line"><span class="fm-score-badge">${selBd.score10}/10</span></p><p class="fm-score-detail">Offensive ${Math.round(selBd.offense01 * 100)}% · Defensive ${Math.round(selBd.defense01 * 100)}% (STAB: worst hit weighted heavily) · Blend ${Math.round(selBd.combined01 * 100)}%</p>`;
+        }
+        html += `</div>`;
+        html += fmStabSectionHtml("Rival 1", R1, monA, monB);
+        html += fmStabSectionHtml("Rival 2", R2, monA, monB);
+        const tips = fmCollectTips(monA, monB, R1, R2);
+        if (tips.length) {
+          html += `<div class="fm-output-section"><h3>Suggestions</h3><ul class="fm-tip-list">${tips
+            .map(
+              (t) =>
+                `<li class="${t.warn ? "fm-tip-warn" : ""}">${escapeHtml(t.text)}</li>`
+            )
+            .join("")}</ul></div>`;
+        }
+      }
+    }
+
+    html += fmRankedPairsHtml(R1, R2);
+    fmOutput.innerHTML = html;
+  }
+
+  function fillFieldMatchupSelects() {
+    const opts = ALL_TYPES.map(
+      (t) =>
+        `<option value="${t}">${t.charAt(0).toUpperCase() + t.slice(1)}</option>`
+    ).join("");
+    const second = `<option value="">— None —</option>` + opts;
+    ["fm-r1-t1", "fm-r2-t1"].forEach((id) => {
+      const el = document.getElementById(id);
+      if (el) {
+        el.innerHTML = opts;
+        el.value = "normal";
+      }
+    });
+    ["fm-r1-t2", "fm-r2-t2"].forEach((id) => {
+      const el = document.getElementById(id);
+      if (el) {
+        el.innerHTML = second;
+        el.value = "";
+      }
+    });
+  }
+
+  function filterPickCandidatesByQuery(candidates, q) {
+    const s = (q || "").trim().toLowerCase();
+    if (!s) return candidates;
+    return candidates.filter(
+      (p) =>
+        (p.nickname || "").toLowerCase().includes(s) ||
+        (p.species || "").toLowerCase().includes(s)
+    );
+  }
+
+  function wirePickListRows(pid, slotIndex) {
+    $(".clear-slot", pickList)?.addEventListener("click", clearCurrentSlot);
+    $$(".pick-row[data-pick-id]", pickList).forEach((row) => {
+      row.addEventListener("click", () => {
+        const id = row.dataset.pickId;
+        state.teams[pid][slotIndex] = id;
+        saveState();
+        pickModal.hidden = true;
+        pickingSlotIndex = null;
+        if (pickSearch) pickSearch.value = "";
+        renderTeam();
+      });
+    });
+  }
+
+  function renderPickListContent() {
+    if (pickingSlotIndex == null || !pickList) return;
+    const slotIndex = pickingSlotIndex;
     const pid = state.activePlayerId;
     const slots = state.teams[pid] || [];
     const used = new Set(slots.filter((id, i) => id && i !== slotIndex));
@@ -1841,41 +2260,45 @@
         p.status !== "dead" &&
         (!used.has(p.id) || p.id === slots[slotIndex])
     );
+    const filtered = filterPickCandidatesByQuery(
+      candidates,
+      pickSearch ? pickSearch.value : ""
+    );
     const clearBtn = `<button type="button" class="pick-row clear-slot" data-clear-slot style="border-style:dashed">
       <span class="pn">Empty this slot</span><span class="ps">Remove Pokémon from slot ${slotIndex + 1}</span>
     </button>`;
 
-    if (!candidates.length) {
+    if (!filtered.length) {
       pickList.innerHTML =
         clearBtn +
-        `<p class="empty-state">No eligible Pokémon. Mark some as party/boxed or remove duplicates from other slots.</p>`;
-      $(".clear-slot", pickList)?.addEventListener("click", clearCurrentSlot);
+        `<p class="empty-state">${
+          candidates.length
+            ? "No matches for this search."
+            : "No eligible Pokémon. Mark some as party/boxed or remove duplicates from other slots."
+        }</p>`;
     } else {
       pickList.innerHTML =
         clearBtn +
-        candidates
-        .map(
-          (p) =>
-            `<button type="button" class="pick-row" data-pick-id="${p.id}">
+        filtered
+          .map(
+            (p) =>
+              `<button type="button" class="pick-row" data-pick-id="${p.id}">
             <img class="sprite-tiny" src="${escapeAttr(spriteSrc(p))}" alt="" width="40" height="40" />
             <div class="pick-row-main"><div class="pn">${escapeAttr(p.nickname)}</div><div class="ps">${escapeAttr(p.species)} Lv.${p.level}</div>${(p.route || "").trim() ? `<div class="pick-route">${escapeHtml((p.route || "").trim())}</div>` : ""}${pickRowStatsHtml(p)}</div>
             <div class="type-icons">${typeIconsHtml(p.types)}</div>
           </button>`
-        )
-        .join("");
-      $(".clear-slot", pickList)?.addEventListener("click", clearCurrentSlot);
-      $$(".pick-row[data-pick-id]", pickList).forEach((row) => {
-        row.addEventListener("click", () => {
-          const id = row.dataset.pickId;
-          state.teams[pid][slotIndex] = id;
-          saveState();
-          pickModal.hidden = true;
-          pickingSlotIndex = null;
-          renderTeam();
-        });
-      });
+          )
+          .join("");
     }
+    wirePickListRows(pid, slotIndex);
+  }
+
+  function openPickModal(slotIndex) {
+    pickingSlotIndex = slotIndex;
+    if (pickSearch) pickSearch.value = "";
+    renderPickListContent();
     pickModal.hidden = false;
+    queueMicrotask(() => pickSearch?.focus());
   }
 
   function clearCurrentSlot() {
@@ -2025,6 +2448,8 @@
     const id = pfId.value;
     if (!id || !confirm("Remove this Pokémon from the save?")) return;
     state.pokemon = state.pokemon.filter((p) => p.id !== id);
+    ensureMatchupsExcludedIds();
+    state.matchupsExcludedIds = state.matchupsExcludedIds.filter((x) => x !== id);
     state.players.forEach((p) => {
       state.teams[p.id] = state.teams[p.id].map((x) => (x === id ? null : x));
     });
@@ -2190,6 +2615,7 @@
     renderRoster();
     renderDead();
     renderTeam();
+    renderFieldMatchups();
   });
 
   rosterSearch.addEventListener("input", renderRoster);
@@ -2219,6 +2645,7 @@
       syncMmModeUi();
       renderMatchupTable();
     }
+    if (name === "field-matchups") renderFieldMatchups();
   }
 
   $$(".tab").forEach((tab) => {
@@ -2298,6 +2725,10 @@
           mon.status = normalizeMonStatus(mon.status);
         });
         if (!Array.isArray(state.itemCatalog)) state.itemCatalog = [];
+        if (!Array.isArray(state.matchupsExcludedIds)) state.matchupsExcludedIds = [];
+        state.matchupsExcludedIds = state.matchupsExcludedIds.filter((id) =>
+          state.pokemon.some((p) => p.id === id)
+        );
         saveState();
         closeModal();
         syncPlayerSelect();
@@ -2305,6 +2736,7 @@
         renderRoster();
         renderDead();
         renderTeam();
+        renderFieldMatchups();
         fillItemCatalogDatalist();
         renderItemCatalogPanel();
         syncItemCatalogHint();
@@ -2378,6 +2810,43 @@
 
   fillTypeSelects();
   fillMatchupSelects();
+  fillFieldMatchupSelects();
+  if (pickSearch && pickModal) {
+    pickSearch.addEventListener("input", () => {
+      if (pickModal.hidden || pickingSlotIndex == null) return;
+      renderPickListContent();
+    });
+  }
+
+  if (fmSlots) {
+    fmSlots.addEventListener("click", (e) => {
+      const simBtn = e.target.closest(".fm-toggle-sim");
+      if (simBtn && fmSlots.contains(simBtn)) {
+        e.preventDefault();
+        e.stopPropagation();
+        const pid = simBtn.dataset.pokemonId;
+        if (pid) toggleMatchupsExcluded(pid);
+        return;
+      }
+      const btn = e.target.closest(".fm-slot--pick");
+      if (!btn || !fmSlots.contains(btn)) return;
+      const slot = Number(btn.dataset.slot);
+      if (Number.isNaN(slot)) return;
+      const ix = fmSelectedSlots.indexOf(slot);
+      if (ix >= 0) fmSelectedSlots.splice(ix, 1);
+      else {
+        if (fmSelectedSlots.length >= 2) fmSelectedSlots.shift();
+        fmSelectedSlots.push(slot);
+      }
+      renderFieldMatchups();
+    });
+  }
+  $$(".fm-rival-sel").forEach((el) => {
+    el.addEventListener("change", () => {
+      syncFmRivalDuplicateSecondTypes();
+      renderFieldMatchups();
+    });
+  });
   wireMmAttackTypePicker();
   syncMmModeUi();
   fillNatureSelect();
