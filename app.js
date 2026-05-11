@@ -284,13 +284,20 @@
       .join(" / ");
   }
 
+  /** English display names A–Z for Type chart defending-type dropdowns. */
+  const ALL_TYPES_ALPHA = [...ALL_TYPES].sort((a, b) =>
+    typingLabel([a]).localeCompare(typingLabel([b]), "en", {
+      sensitivity: "base",
+    })
+  );
+
   function typeNameEn(slug) {
     if (!slug) return "";
     return String(slug).charAt(0).toUpperCase() + String(slug).slice(1);
   }
 
   function fillMatchupSelects() {
-    const opts = ALL_TYPES.map(
+    const opts = ALL_TYPES_ALPHA.map(
       (t) =>
         `<option value="${t}">${t.charAt(0).toUpperCase() + t.slice(1)}</option>`
     ).join("");
@@ -942,6 +949,7 @@
   const rosterFilterType = $("#roster-filter-type");
   const deadSortStat = $("#dead-sort-stat");
   const deadFilterType = $("#dead-filter-type");
+  const deadSearch = $("#dead-search");
   const rosterList = $("#roster-list");
   const deadList = $("#dead-list");
   const teamSlots = $("#team-slots");
@@ -972,6 +980,10 @@
   const pickModal = $("#pick-modal");
   const pickList = $("#pick-list");
   const pickSearch = $("#pick-search");
+  const bulkLevelModalRoot = $("#bulk-level-modal-root");
+  const bulkLevelInput = $("#bulk-level-input");
+  const bulkLevelCount = $("#bulk-level-count");
+  const bulkLevelApply = $("#bulk-level-apply");
   const pokemonForm = $("#pokemon-form");
   const pfId = $("#pf-id");
   const pfPlayer = $("#pf-player");
@@ -1526,6 +1538,15 @@
     );
   }
 
+  function filterDeadQuery(mon, q) {
+    if (!q) return true;
+    const s = q.toLowerCase();
+    return (
+      (mon.nickname || "").toLowerCase().includes(s) ||
+      (mon.species || "").toLowerCase().includes(s)
+    );
+  }
+
   function fillSortStatSelects() {
     const opts = [
       ["", "Default order"],
@@ -1589,16 +1610,21 @@
     const pid = state.activePlayerId;
     const sortKey = deadSortStat ? deadSortStat.value : "";
     const typeFilter = deadFilterType ? deadFilterType.value : "";
-    const baseItems = state.pokemon.filter(
+    const q = deadSearch ? deadSearch.value.trim() : "";
+    const allDead = state.pokemon.filter(
       (p) => p.playerId === pid && p.status === "dead"
     );
+    const baseItems = allDead.filter((p) => filterDeadQuery(p, q));
     const items = applySortAndTypeFilter(baseItems, sortKey, typeFilter);
     if (!items.length) {
-      deadList.innerHTML = `<p class="empty-state">${
-        baseItems.length
-          ? "No fallen Pokémon match the type filter. Try “Any type”."
-          : "No fallen Pokémon yet."
-      }</p>`;
+      let msg;
+      if (!allDead.length) msg = "No fallen Pokémon yet.";
+      else if (!baseItems.length)
+        msg = "No Pokémon match your search. Try a different name or species.";
+      else
+        msg =
+          "No fallen Pokémon match the type filter. Try “Any type”.";
+      deadList.innerHTML = `<p class="empty-state">${msg}</p>`;
       return;
     }
     deadList.innerHTML = items.map((mon) => cardHtml(mon, true)).join("");
@@ -2202,7 +2228,7 @@
   }
 
   function fillFieldMatchupSelects() {
-    const opts = ALL_TYPES.map(
+    const opts = ALL_TYPES_ALPHA.map(
       (t) =>
         `<option value="${t}">${t.charAt(0).toUpperCase() + t.slice(1)}</option>`
     ).join("");
@@ -2624,6 +2650,7 @@
   if (rosterFilterType) rosterFilterType.addEventListener("change", renderRoster);
   if (deadSortStat) deadSortStat.addEventListener("change", renderDead);
   if (deadFilterType) deadFilterType.addEventListener("change", renderDead);
+  if (deadSearch) deadSearch.addEventListener("input", renderDead);
 
   function showMainPanel(name) {
     $$(".tab").forEach((t) => {
@@ -2692,6 +2719,67 @@
       renderMatchupTable();
     });
   });
+  function openBulkLevelModal() {
+    if (!bulkLevelModalRoot) return;
+    const pid = state.activePlayerId;
+    const pName = state.players.find((p) => p.id === pid)?.name || "Player";
+    const list = state.pokemon.filter((p) => p.playerId === pid);
+    const n = list.length;
+    if (bulkLevelCount) {
+      bulkLevelCount.textContent = n
+        ? `${n} Pokémon for “${pName}” (party, boxed, dead) will be set to the same level.`
+        : `No Pokémon for “${pName}” — add some first.`;
+    }
+    if (bulkLevelInput) {
+      const withLv = list.find((p) => p.level != null && p.level !== "");
+      const fallback = withLv != null ? Number(withLv.level) : 50;
+      bulkLevelInput.value = String(
+        Math.max(1, Math.min(100, Number.isFinite(fallback) ? fallback : 50))
+      );
+    }
+    if (bulkLevelApply) bulkLevelApply.disabled = n === 0;
+    bulkLevelModalRoot.hidden = false;
+    queueMicrotask(() => bulkLevelInput?.focus());
+  }
+
+  function closeBulkLevelModal() {
+    if (bulkLevelModalRoot) bulkLevelModalRoot.hidden = true;
+  }
+
+  function applyBulkLevel() {
+    if (!bulkLevelInput) return;
+    const raw = Number(bulkLevelInput.value);
+    const lv = Math.max(
+      1,
+      Math.min(100, Math.round(Number.isFinite(raw) ? raw : 1))
+    );
+    const pid = state.activePlayerId;
+    let c = 0;
+    state.pokemon.forEach((p) => {
+      if (p.playerId === pid) {
+        p.level = lv;
+        c += 1;
+      }
+    });
+    if (c === 0) {
+      alert("This player has no Pokémon to update.");
+      return;
+    }
+    saveState();
+    closeBulkLevelModal();
+    closeModal();
+    renderRoster();
+    renderDead();
+    renderTeam();
+    renderFieldMatchups();
+  }
+
+  $("#btn-set-all-levels")?.addEventListener("click", openBulkLevelModal);
+  bulkLevelApply?.addEventListener("click", applyBulkLevel);
+  $$("[data-close-bulk-level]").forEach((el) => {
+    el.addEventListener("click", closeBulkLevelModal);
+  });
+
   $("#btn-export").addEventListener("click", () => {
     const blob = new Blob([JSON.stringify(state, null, 2)], {
       type: "application/json",

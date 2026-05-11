@@ -28,6 +28,7 @@
         Import JSON
         <input type="file" id="import-file" accept="application/json,.json" hidden />
       </label>
+      <button type="button" id="btn-set-all-levels" class="btn secondary" title="Set the same level on every Pokémon for this player">Set all levels</button>
       <button type="button" id="btn-add-pokemon" class="btn primary">Add Pokémon</button>
     </div>
   </header>
@@ -60,6 +61,7 @@
 
     <section id="panel-dead" class="panel" data-panel="dead" hidden>
       <div class="toolbar toolbar-filters dead-toolbar">
+        <input type="search" id="dead-search" placeholder="Buscar por nombre o especie…" aria-label="Buscar en caja de muertos" />
         <label class="filter-label">Sort by stat
           <select id="dead-sort-stat" aria-label="Sort dead box by highest stat"></select>
         </label>
@@ -317,6 +319,27 @@
       </div>
     </section>
   </main>
+
+  <div id="bulk-level-modal-root" class="modal-root" hidden>
+    <div class="modal-backdrop" data-close-bulk-level></div>
+    <div class="modal" role="dialog" aria-modal="true" aria-labelledby="bulk-level-title">
+      <header class="modal-header">
+        <h2 id="bulk-level-title">Set level for all Pokémon</h2>
+        <button type="button" class="icon-btn" data-close-bulk-level aria-label="Close">×</button>
+      </header>
+      <div class="bulk-level-body">
+        <p class="hint" id="bulk-level-hint">Applies to the <strong>active player</strong> only: party, boxed, and dead box. Individual Pokémon can still be edited separately afterward.</p>
+        <label class="bulk-level-label">Level (1–100)
+          <input type="number" id="bulk-level-input" min="1" max="100" value="50" />
+        </label>
+        <p class="bulk-level-count muted" id="bulk-level-count" aria-live="polite"></p>
+        <div class="bulk-level-actions">
+          <button type="button" class="btn secondary" data-close-bulk-level>Cancel</button>
+          <button type="button" class="btn primary" id="bulk-level-apply">Apply to all</button>
+        </div>
+      </div>
+    </div>
+  </div>
 
   <div id="welcome-modal-root" class="modal-root welcome-modal-root" hidden>
     <div class="modal-backdrop welcome-modal-backdrop"></div>
